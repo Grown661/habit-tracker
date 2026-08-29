@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Habit Tracker</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #2ea043;
+    --l0: #161b22; --l1: #0e4429; --l2: #006d32; --l3: #26a641; --l4: #39d353;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; padding: 24px; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); margin-bottom: 20px; font-size: .9rem; }
+  .row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  input[type=text] { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; flex: 1; min-width: 200px; }
+  button { background: var(--accent); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+  button.secondary { background: var(--panel); border: 1px solid var(--border); color: var(--text); font-weight: 400; }
+  button:hover { filter: brightness(1.15); }
+  .habit { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 14px; }
+  .habit input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
+  .habit .name { flex: 1; font-weight: 600; }
+  .habit .streak { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+  .habit .del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; padding: 2px 6px; }
+  .habit .del:hover { color: #f85149; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 24px; overflow-x: auto; }
+  .card h2 { font-size: 1rem; margin-bottom: 12px; }
+  .heatmap { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 12px); gap: 3px; }
+  .cell { width: 12px; height: 12px; border-radius: 2px; background: var(--l0); border: 1px solid rgba(255,255,255,.04); }
+  .legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; color: var(--muted); font-size: .8rem; }
+  .legend .cell { display: inline-block; }
+  .empty { color: var(--muted); padding: 20px; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>Habit Tracker</h1>
+  <p class="sub">Gewohnheiten täglich abhaken – die Heatmap zeigt deinen Erfüllungsgrad über das Jahr.</p>
+
+  <div class="row">
+    <input type="text" id="habitInput" placeholder="Neue Gewohnheit, z. B. „Lesen“" maxlength="60">
+    <button id="addBtn">Hinzufügen</button>
+    <button class="secondary" id="exportBtn">Export JSON</button>
+    <button class="secondary" id="importBtn">Import JSON</button>
+    <input type="file" id="importFile" accept=".json" hidden>
+  </div>
+
+  <div id="habitList"></div>
+
+  <div class="card">
+    <h2 id="heatmapTitle">Jahres-Heatmap</h2>
+    <div class="heatmap" id="heatmap"></div>
+    <div class="legend">
+      Weniger
+      <span class="cell" style="background:var(--l0)"></span>
+      <span class="cell" style="background:var(--l1)"></span>
+      <span class="cell" style="background:var(--l2)"></span>
+      <span class="cell" style="background:var(--l3)"></span>
+      <span class="cell" style="background:var(--l4)"></span>
+      Mehr
+    </div>
+  </div>
+
+<script>
+"use strict";
+const STORAGE_KEY = "habit-tracker-v1";
+
+let state = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.habits)) return parsed;
+    }
+  } catch (e) { /* korrupte Daten ignorieren */ }
+  return { habits: [] };
+}
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+// Lokales Datum als YYYY-MM-DD (bewusst nicht toISOString, um Zeitzonen-Verschiebung zu vermeiden)
+function fmtDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+const today = () => fmtDate(new Date());
+
+function addHabit(name) {
+  state.habits.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), name, done: {} });
+  save(); render();
+}
+
+function deleteHabit(id) {
+  const h = state.habits.find(h => h.id === id);
+  if (!h) return;
+  if (!confirm(`Gewohnheit „${h.name}“ wirklich löschen?`)) return;
+  state.habits = state.habits.filter(h => h.id !== id);
+  save(); render();
+}
+
+function toggleToday(id) {
+  const h = state.habits.find(h => h.id === id);
+  if (!h) return;
+  const t = today();
+  if (h.done[t]) delete h.done[t]; else h.done[t] = true;
+  save(); render();
+}
+
+// Streaks: aktuelle Serie (heute oder gestern als Startpunkt) + längste Serie
+function streaks(habit) {
+  const dates = Object.keys(habit.done).sort();
+  if (dates.length === 0) return { current: 0, longest: 0 };
+
+  const set = new Set(dates);
+  const dayMs = 86400000;
+
+  // aktuelle Serie
+  let cursor = new Date();
+  if (!set.has(fmtDate(cursor))) cursor = new Date(cursor.getTime() - dayMs);
+  let current = 0;
+  while (set.has(fmtDate(cursor))) { current++; cursor = new Date(cursor.getTime() - dayMs); }
+
+  // längste Serie
+  let longest = 1, run = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const prev = new Date(dates[i - 1] + "T12:00:00");
+    const cur = new Date(dates[i] + "T12:00:00");
+    if (Math.round((cur - prev) / dayMs) === 1) run++; else run = 1;
+    if (run > longest) longest = run;
+  }
+  return { current, longest };
+}
+
+function renderHabits() {
+  const list = document.getElementById("habitList");
+  list.innerHTML = "";
+  if (state.habits.length === 0) {
+    list.innerHTML = `<div class="empty">Noch keine Gewohnheiten – leg oben eine an.</div>`;
+    return;
+  }
+  const t = today();
+  for (const h of state.habits) {
+    const s = streaks(h);
+    const el = document.createElement("div");
+    el.className = "habit";
+    el.innerHTML = `
+      <input type="checkbox" ${h.done[t] ? "checked" : ""} title="Heute abhaken">
+      <span class="name"></span>
+      <span class="streak">🔥 ${s.current} Tage · Rekord: ${s.longest}</span>
+      <button class="del" title="Löschen">✕</button>`;
+    el.querySelector(".name").textContent = h.name;
+    el.querySelector("input").addEventListener("change", () => toggleToday(h.id));
+    el.querySelector(".del").addEventListener("click", () => deleteHabit(h.id));
+    list.appendChild(el);
+  }
+}
+
+function renderHeatmap() {
+  const grid = document.getElementById("heatmap");
+  grid.innerHTML = "";
+  const year = new Date().getFullYear();
+  document.getElementById("heatmapTitle").textContent = `Jahres-Heatmap ${year} (alle Gewohnheiten)`;
+
+  const start = new Date(year, 0, 1);
+  const end = new Date(year, 11, 31);
+  // Grid beginnt am Montag der ersten Woche
+  const startOffset = (start.getDay() + 6) % 7; // Mo=0 … So=6
+  const gridStart = new Date(start.getTime() - startOffset * 86400000);
+
+  const total = state.habits.length;
+  for (let d = new Date(gridStart); d <= end; d = new Date(d.getTime() + 86400000)) {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    if (d >= start) {
+      const key = fmtDate(d);
+      const doneCount = state.habits.filter(h => h.done[key]).length;
+      const ratio = total === 0 ? 0 : doneCount / total;
+      let level = 0;
+      if (ratio > 0) level = 1;
+      if (ratio >= 0.34) level = 2;
+      if (ratio >= 0.67) level = 3;
+      if (ratio >= 1) level = 4;
+      cell.style.background = `var(--l${level})`;
+      cell.title = `${key}: ${doneCount}/${total} erledigt`;
+    } else {
+      cell.style.visibility = "hidden";
+    }
+    grid.appendChild(cell);
+  }
+}
+
+function render() { renderHabits(); renderHeatmap(); }
+
+// --- Events ---
+document.getElementById("addBtn").addEventListener("click", () => {
+  const input = document.getElementById("habitInput");
+  const name = input.value.trim();
+  if (!name) return;
+  addHabit(name);
+  input.value = "";
+  input.focus();
+});
+document.getElementById("habitInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("addBtn").click();
+});
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "habit-tracker-export.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importFile").click());
+document.getElementById("importFile").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || !Array.isArray(data.habits)) throw new Error("Ungültiges Format");
+      state = data;
+      save(); render();
+    } catch (err) {
+      alert("Import fehlgeschlagen: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = "";
+});
+
+render();
+</script>
+</body>
+</html>
