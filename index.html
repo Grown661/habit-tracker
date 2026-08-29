@@ -122,11 +122,11 @@ function streaks(habit) {
   const set = new Set(dates);
   const dayMs = 86400000;
 
-  // aktuelle Serie
+  // aktuelle Serie (kalendarisch zurueckzaehlen, DST-sicher)
   let cursor = new Date();
-  if (!set.has(fmtDate(cursor))) cursor = new Date(cursor.getTime() - dayMs);
+  if (!set.has(fmtDate(cursor))) cursor.setDate(cursor.getDate() - 1);
   let current = 0;
-  while (set.has(fmtDate(cursor))) { current++; cursor = new Date(cursor.getTime() - dayMs); }
+  while (set.has(fmtDate(cursor))) { current++; cursor.setDate(cursor.getDate() - 1); }
 
   // längste Serie
   let longest = 1, run = 1;
@@ -173,10 +173,12 @@ function renderHeatmap() {
   const end = new Date(year, 11, 31);
   // Grid beginnt am Montag der ersten Woche
   const startOffset = (start.getDay() + 6) % 7; // Mo=0 … So=6
-  const gridStart = new Date(start.getTime() - startOffset * 86400000);
+  const gridStart = new Date(start);
+  gridStart.setDate(gridStart.getDate() - startOffset);
 
   const total = state.habits.length;
-  for (let d = new Date(gridStart); d <= end; d = new Date(d.getTime() + 86400000)) {
+  // kalendarisch iterieren (setDate), nicht ueber ms-Addition – DST-sicher
+  for (let d = new Date(gridStart); d <= end; d.setDate(d.getDate() + 1)) {
     const cell = document.createElement("div");
     cell.className = "cell";
     if (d >= start) {
