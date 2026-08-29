@@ -68,12 +68,25 @@ const STORAGE_KEY = "habit-tracker-v1";
 
 let state = load();
 
+// Strukturelle Validierung: erwartet { habits: [{ id, name, done: { "YYYY-MM-DD": true } }] }
+function isValidState(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  if (!Array.isArray(data.habits)) return false;
+  return data.habits.every(h =>
+    h && typeof h === "object" && !Array.isArray(h) &&
+    typeof h.id === "string" && h.id.length > 0 &&
+    typeof h.name === "string" && h.name.length > 0 &&
+    h.done !== null && typeof h.done === "object" && !Array.isArray(h.done) &&
+    Object.keys(h.done).every(k => /^\d{4}-\d{2}-\d{2}$/.test(k))
+  );
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.habits)) return parsed;
+      if (isValidState(parsed)) return parsed;
     }
   } catch (e) { /* korrupte Daten ignorieren */ }
   return { habits: [] };
@@ -231,11 +244,11 @@ document.getElementById("importFile").addEventListener("change", e => {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!data || !Array.isArray(data.habits)) throw new Error("Ungültiges Format");
+      if (!isValidState(data)) throw new Error("Ungültiges Format – erwartet wird ein Export dieser App ({ habits: […] })");
       state = data;
       save(); render();
     } catch (err) {
-      alert("Import fehlgeschlagen: " + err.message);
+      alert("Import fehlgeschlagen: " + err.message + "\nDie bestehenden Daten bleiben unverändert.");
     }
   };
   reader.readAsText(file);
