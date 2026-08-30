@@ -1,5 +1,7 @@
 # Habit Tracker
 
+**Live-Demo:** https://grown661.github.io/habit-tracker/
+
 Gewohnheiten konsequent durchzuziehen scheitert oft daran, dass man den eigenen Fortschritt nicht sieht – dieser Tracker macht ihn als Jahres-Heatmap im GitHub-Stil sichtbar.
 
 ## Features
